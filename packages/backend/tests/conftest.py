@@ -4,6 +4,7 @@ from collections.abc import AsyncGenerator, Generator
 import fakeredis.aioredis
 import pytest
 
+from message_broker_patterns.event_sourcing_pattern.store import EventStore
 from message_broker_patterns.outbox_pattern.store import create_tables
 from message_broker_patterns.saga_pattern.broker import SagaBroker
 
@@ -28,3 +29,12 @@ async def saga_broker(fake_redis: fakeredis.aioredis.FakeRedis) -> AsyncGenerato
     broker = SagaBroker(fake_redis)
     yield broker
     await broker.close()
+
+
+@pytest.fixture()
+async def event_store(
+    fake_redis: fakeredis.aioredis.FakeRedis,
+) -> AsyncGenerator[EventStore, None]:
+    store = EventStore(fake_redis)
+    yield store
+    await store.close()
