@@ -3,6 +3,8 @@ import logging
 import redis.asyncio as aioredis
 from redis.exceptions import ResponseError
 
+from message_broker_patterns.metrics import REGISTRY
+
 logger = logging.getLogger(__name__)
 
 # Raised by XGROUP CREATE when the group already exists. Treated as a no-op so
@@ -25,6 +27,7 @@ class CompetingConsumersBroker:
     async def publish(self, stream: str, task_fields: dict[str, str]) -> str:
         """Append a task to the stream and return its generated message id."""
         msg_id: bytes | str = await self._client.xadd(stream, task_fields)
+        REGISTRY.increment("competing_consumers", "messages_published")
         decoded = msg_id.decode() if isinstance(msg_id, bytes) else msg_id
         logger.debug("Published to stream %s: id=%s", stream, decoded)
         return decoded

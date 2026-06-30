@@ -3,6 +3,7 @@ import logging
 import redis.asyncio as aioredis
 
 from message_broker_patterns.event_sourcing_pattern.events import account_stream
+from message_broker_patterns.metrics import REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ class EventStore:
         stream = account_stream(account_id)
         fields = {"event_type": event_type, **payload}
         msg_id: str = await self._client.xadd(stream, fields)
+        REGISTRY.increment("event_sourcing", "events_appended")
         logger.debug("Appended %s to stream %s: id=%s", event_type, stream, msg_id)
         return msg_id
 

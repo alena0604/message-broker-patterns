@@ -3,6 +3,7 @@ import logging
 import sqlite3
 from datetime import UTC, datetime
 
+from message_broker_patterns.metrics import REGISTRY
 from message_broker_patterns.outbox_pattern.models import Order, OutboxEntry
 
 logger = logging.getLogger(__name__)
@@ -45,6 +46,7 @@ def insert_order_with_outbox(conn: sqlite3.Connection, order: Order) -> OutboxEn
             (entry.order_id, entry.payload, entry.created_at.isoformat()),
         )
         entry.id = cursor.lastrowid
+    REGISTRY.increment("transactional_outbox", "orders_inserted")
     logger.debug("Inserted order %s with outbox entry %s", order.order_id, entry.id)
     return entry
 

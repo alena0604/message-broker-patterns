@@ -1,5 +1,6 @@
 import logging
 
+from message_broker_patterns.metrics import REGISTRY
 from message_broker_patterns.saga_pattern.broker import SagaBroker
 from message_broker_patterns.saga_pattern.events import (
     STREAM_ORDERS,
@@ -21,6 +22,7 @@ class OrderService:
 
     def create_order(self, order: Order) -> None:
         self._orders[order.order_id] = order
+        REGISTRY.increment("saga", "sagas_started")
         logger.info("Order %s created (status: %s)", order.order_id, order.status)
 
     async def publish_created(self, order: Order) -> None:
@@ -47,6 +49,7 @@ class OrderService:
             logger.warning("OrderService: unknown order %s", event.order_id)
             return
         order.status = SagaStatus.CANCELLED
+        REGISTRY.increment("saga", "sagas_cancelled")
         compensation = OrderCancelled(order_id=order.order_id, reason=event.reason)
         await self._broker.publish(STREAM_ORDERS, compensation.event_type, compensation.to_dict())
         logger.info("Order %s CANCELLED (compensation published)", order.order_id)
@@ -57,6 +60,7 @@ class OrderService:
             logger.warning("OrderService: unknown order %s", event.order_id)
             return
         order.status = SagaStatus.COMPLETED
+        REGISTRY.increment("saga", "sagas_completed")
         logger.info("Order %s COMPLETED (tracking: %s)", order.order_id, event.tracking_number)
 
     def get_order(self, order_id: str) -> Order | None:

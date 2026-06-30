@@ -3,6 +3,7 @@ import json
 import logging
 import sqlite3
 
+from message_broker_patterns.metrics import REGISTRY
 from message_broker_patterns.outbox_pattern.broker import RedisBroker
 from message_broker_patterns.outbox_pattern.store import delete_outbox_entry, poll_outbox
 
@@ -25,6 +26,7 @@ async def run(
             await broker.publish(stream, str_payload)
             assert entry.id is not None
             delete_outbox_entry(conn, entry.id)
+            REGISTRY.increment("transactional_outbox", "entries_relayed")
             logger.info("Relayed outbox entry %s → stream %s", entry.id, stream)
         await asyncio.sleep(poll_interval)
     logger.info("Relay stopped")
