@@ -6,6 +6,7 @@ from message_broker_patterns.competing_consumers_pattern.broker import (
     CompetingConsumersBroker,
 )
 from message_broker_patterns.competing_consumers_pattern.models import Task
+from message_broker_patterns.metrics import REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ async def _handle_batch(
         task = Task.from_fields(fields)
         await handler(consumer_id, task)
         await broker.ack(stream, group, message_id)
+        REGISTRY.increment("competing_consumers", "messages_consumed")
         handled += 1
         logger.info(
             "consumer=%s handled task=%s msg=%s",
@@ -66,6 +68,7 @@ async def run_consumer(
     hot-spinning the loop.
     """
     await broker.ensure_group(stream, group)
+    REGISTRY.increment("competing_consumers", "consumer_joins")
     logger.info("consumer=%s joined group=%s on stream=%s", consumer_id, group, stream)
 
     total_handled = 0

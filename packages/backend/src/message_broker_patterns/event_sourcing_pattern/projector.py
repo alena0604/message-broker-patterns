@@ -12,6 +12,7 @@ from message_broker_patterns.event_sourcing_pattern.events import (
     decode_event,
 )
 from message_broker_patterns.event_sourcing_pattern.store import EventStore
+from message_broker_patterns.metrics import REGISTRY
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,7 @@ async def project(
         for msg_id, raw in await store.read(account_id, last_id):
             last_id = msg_id
             summary.apply(raw)
+            REGISTRY.increment("event_sourcing", "read_model_events_applied")
 
         if summary.version >= expected_version:
             logger.info(
