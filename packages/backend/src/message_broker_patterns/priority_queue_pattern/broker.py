@@ -81,12 +81,17 @@ class PriorityQueueBroker:
     ) -> list[tuple[str, dict[bytes, bytes]]]:
         """Claim up to ``count`` never-delivered messages from one priority stream.
 
-        Blocks up to ``block_ms`` ms when the stream is empty. Returns
-        ``(message_id, fields)`` pairs; an empty list on timeout.
+        Blocks up to ``block_ms`` ms when the stream is empty. A ``block_ms`` of
+        ``0`` (or less) means a truly non-blocking poll — no ``BLOCK`` argument
+        is sent, so Redis returns immediately. (Passing ``BLOCK 0`` to Redis
+        would block *forever*, which is the opposite of what a non-blocking
+        strict-priority scan needs.) Returns ``(message_id, fields)`` pairs; an
+        empty list on timeout or when nothing is waiting.
         """
         stream = STREAMS[priority]
+        block = block_ms if block_ms > 0 else None
         results = await self._client.xreadgroup(
-            group, consumer, {stream: ">"}, count=count, block=block_ms
+            group, consumer, {stream: ">"}, count=count, block=block
         )
         if not results:
             return []

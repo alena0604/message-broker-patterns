@@ -13,7 +13,7 @@ from message_broker_patterns.priority_queue_pattern.broker import (  # noqa: E40
     PriorityQueueBroker,
 )
 from message_broker_patterns.priority_queue_pattern.consumer import (  # noqa: E402
-    run_consumer,
+    run_strict_priority_consumer,
 )
 from message_broker_patterns.priority_queue_pattern.models import (  # noqa: E402
     Priority,
@@ -50,7 +50,14 @@ async def main() -> None:
     for ticket in TICKETS:
         await broker.publish(ticket)
 
-    # Proportional consumer pools: 4 HIGH, 3 NORMAL, 3 LOW.
+    # A single strict-priority consumer polls HIGH → NORMAL → LOW, draining each
+    # tier fully before descending. This yields a totally-ordered drain: every
+    # HIGH ticket finishes before the first NORMAL starts, and every NORMAL
+    # before the first LOW — the production-like strict scheduling this demo
+    # exists to show. (Running several such consumers concurrently against one
+    # group would relax this to *per-consumer* strict order: an idle consumer
+    # would descend to a lower tier while a peer is still working a higher one,
+    # reintroducing the cross-tier races this pattern is meant to eliminate.)
     handled_by: dict[str, list[str]] = {}
     lock = asyncio.Lock()
 
@@ -77,24 +84,11 @@ async def main() -> None:
             await asyncio.sleep(0.02)
         stop.set()
 
-    consumers = []
-    for i in range(4):
-        cid = f"high-agent-{i}"
-        consumers.append(
-            run_consumer(broker, Priority.HIGH, cid, GROUP, make_handler(cid), stop)
-        )
-    for i in range(3):
-        cid = f"normal-agent-{i}"
-        consumers.append(
-            run_consumer(broker, Priority.NORMAL, cid, GROUP, make_handler(cid), stop)
-        )
-    for i in range(3):
-        cid = f"low-agent-{i}"
-        consumers.append(
-            run_consumer(broker, Priority.LOW, cid, GROUP, make_handler(cid), stop)
-        )
-
-    await asyncio.gather(*consumers, _stop_when_drained())
+    cid = "strict-agent"
+    await asyncio.gather(
+        run_strict_priority_consumer(broker, cid, GROUP, make_handler(cid), stop),
+        _stop_when_drained(),
+    )
 
     logger.info("=== Results ===")
     for cid, tickets in sorted(handled_by.items()):

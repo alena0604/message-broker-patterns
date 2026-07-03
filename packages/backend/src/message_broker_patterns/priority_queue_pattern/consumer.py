@@ -60,3 +60,72 @@ async def run_consumer(
             await asyncio.sleep(idle_sleep)
     logger.info("consumer=%s stopping — handled %d ticket(s)", consumer_id, total_handled)
     return total_handled
+
+
+async def run_strict_priority_consumer(
+    broker: PriorityQueueBroker,
+    consumer_id: str,
+    group: str,
+    handler: Handler,
+    stop_event: asyncio.Event,
+    *,
+    priorities: list[Priority] | None = None,
+    count: int = 10,
+    idle_sleep: float = 0.01,
+) -> int:
+    """Run one consumer that drains all tiers in strict priority order.
+
+    Unlike :func:`run_consumer` (one consumer pinned to a single priority), a
+    strict-priority consumer polls every tier from highest to lowest on each
+    iteration. It reads non-blocking (``block_ms=0``), processes the first tier
+    that has messages, then restarts the scan from the top. This guarantees that
+    while any higher-priority ticket is waiting, no lower-priority ticket is
+    claimed — production-like strict scheduling rather than a multi-level queue
+    where every tier drains concurrently.
+
+    ``priorities`` defaults to ``[HIGH, NORMAL, LOW]``. When no tier has work the
+    consumer yields via ``await asyncio.sleep(idle_sleep)`` so it can't hot-spin
+    or ignore the stop signal. Returns the total number of tickets handled.
+    """
+    scan_order = (
+        priorities if priorities is not None else [Priority.HIGH, Priority.NORMAL, Priority.LOW]
+    )
+    for priority in scan_order:
+        await broker.ensure_group(priority, group)
+    logger.info(
+        "consumer=%s joined strict-priority scan %s (group=%s)",
+        consumer_id,
+        [p.value for p in scan_order],
+        group,
+    )
+    total_handled = 0
+    while not stop_event.is_set():
+        handled_any = False
+        for priority in scan_order:
+            batch = await broker.read_new(priority, group, consumer_id, count, 0)
+            if not batch:
+                continue
+            for msg_id, fields in batch:
+                ticket = SupportTicket.from_fields(fields)
+                await handler(consumer_id, ticket)
+                await broker.ack(priority, group, msg_id)
+                REGISTRY.increment("priority_queue", "tickets_consumed")
+                REGISTRY.increment("priority_queue", f"{priority.value}_consumed")
+                total_handled += 1
+                logger.info(
+                    "consumer=%s processed ticket=%s (%s) msg=%s",
+                    consumer_id,
+                    ticket.ticket_id,
+                    ticket.priority.value,
+                    msg_id,
+                )
+            handled_any = True
+            break  # restart the scan from the highest priority
+        if not handled_any:
+            await asyncio.sleep(idle_sleep)
+    logger.info(
+        "consumer=%s stopping — handled %d ticket(s) (strict priority)",
+        consumer_id,
+        total_handled,
+    )
+    return total_handled
