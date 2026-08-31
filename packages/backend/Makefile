@@ -1,4 +1,4 @@
-.PHONY: install test unit-tests integration-tests lint-check lint-fix format-check format-fix pre-commit build publish
+.PHONY: install test unit-tests integration-tests lint-check lint-fix format-check format-fix pre-commit bench build publish
 
 install:
 	uv sync
@@ -25,6 +25,12 @@ format-fix:
 
 pre-commit: format-check lint-check
 	uv run pytest tests/unit -q
+
+bench:
+	uv run python scripts/bench_outbox_pattern.py
+	uv run python scripts/bench_scatter_gather_pattern.py
+	uv run python scripts/bench_competing_consumers_pattern.py
+	uv run python scripts/bench_dlq_pattern.py
 
 build:
 	uv build
