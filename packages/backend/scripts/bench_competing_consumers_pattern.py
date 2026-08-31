@@ -14,6 +14,11 @@ the latency recorded is a real publish-to-handled time and not a fire-and-forget
 the consumers a backlog to compete over; with one operation at a time every
 consumer but one would sit idle and the knob would look useless.
 
+Every Redis identity this bench uses — stream, consumer group, consumer names —
+carries a per-process run id, so two copies of it can run at once against one
+Redis without Redis handing one run's task to the other's identically-named
+consumer (which resolves the wrong future and hangs the publisher of the task).
+
 Queue depth is the group's pending-entries count (``XPENDING``) — messages
 delivered to a consumer but not yet acked. That, not ``XLEN``, is the backlog an
 operator watches: a stream's length only ever grows, since acking a message does
@@ -42,6 +47,7 @@ from message_broker_patterns.bench import (  # noqa: E402
     Window,
     add_bench_args,
     emit_json,
+    new_run_id,
     run_bench,
     show_bench_progress,
     write_csv_files,
@@ -57,10 +63,22 @@ from message_broker_patterns.config.settings import settings  # noqa: E402
 
 show_bench_progress()
 logger = logging.getLogger("bench_competing_consumers")
+# This script's own progress line, like the harness's, survives the deliberately
+# quiet root level set above.
+logger.setLevel(logging.INFO)
 
-# A stream and group of this bench's own, so a run never disturbs the demo.
-STREAM = "bench:tasks:work"
-GROUP = "bench_workers"
+# A stream and group of this *run's* own, so a run never disturbs the demo — or
+# another copy of this bench. The run id namespaces all three Redis identities
+# the scheduling depends on: two concurrent runs then publish to different
+# streams, read through differently-named groups and never share a consumer
+# name, so Redis cannot deliver one run's task to the other's consumer (which
+# would resolve the wrong future and leave the publisher awaiting one that never
+# resolves). Namespacing the stream as well as the group matters for a second
+# reason: each configuration deletes its stream either side of the window, and a
+# shared stream would mean deleting another run's backlog mid-flight.
+RUN_ID = new_run_id()
+STREAM = f"bench:{RUN_ID}:tasks:work"
+GROUP = f"bench_workers_{RUN_ID}"
 
 # Simulated per-task work. Small enough to keep the bench short, large enough
 # that the handler — not Redis — is what a consumer is busy with.
@@ -97,7 +115,7 @@ async def bench_consumer_count(consumers: int, args: argparse.Namespace) -> Benc
                 broker,
                 STREAM,
                 GROUP,
-                f"bench-worker-{index}",
+                f"bench-worker-{index}-{RUN_ID}",
                 handler,
                 stop,
                 count=10,
@@ -150,6 +168,9 @@ async def bench_consumer_count(consumers: int, args: argparse.Namespace) -> Benc
 
 async def main() -> None:
     args = _parse_args()
+    # Logged, not emitted in the JSON: the operator needs it to find this run's
+    # keys in `redis-cli` while it is running, but it is not a measurement.
+    logger.info("bench run %s — stream=%s group=%s", RUN_ID, STREAM, GROUP)
     results = [await bench_consumer_count(count, args) for count in args.consumers]
     emit_json(results, stream=sys.stdout)
     if args.csv_dir is not None:

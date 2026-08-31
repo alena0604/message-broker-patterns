@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import json
+import re
 
 import pytest
 from pytest_mock import MockerFixture
@@ -14,6 +15,7 @@ from message_broker_patterns.bench import (
     add_bench_args,
     emit_json,
     latency_csv,
+    new_run_id,
     percentile,
     queue_depth_csv,
     run_bench,
@@ -393,6 +395,29 @@ def test_add_bench_args_takes_a_per_script_sample_interval() -> None:
     add_bench_args(parser, ops=1, warmup=0, sample_interval=0.02)
 
     assert parser.parse_args([]).sample_interval == 0.02
+
+
+# --- new_run_id ---------------------------------------------------------------
+
+
+def test_new_run_id_is_short_lowercase_hex() -> None:
+    run_id = new_run_id()
+
+    assert re.fullmatch(r"[0-9a-f]{8}", run_id), run_id
+
+
+def test_new_run_id_differs_across_calls() -> None:
+    run_ids = {new_run_id() for _ in range(1_000)}
+
+    assert len(run_ids) == 1_000
+
+
+def test_new_run_id_is_drawn_from_uuid4(mocker: MockerFixture) -> None:
+    uuid4 = mocker.patch(f"{MODULE}.uuid4")
+    uuid4.return_value.hex = "0123456789abcdef" * 2
+
+    assert new_run_id() == "01234567"
+    uuid4.assert_called_once_with()
 
 
 def test_show_bench_progress_enables_the_modules_info_lines() -> None:
