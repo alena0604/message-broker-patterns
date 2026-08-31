@@ -2,6 +2,7 @@ from message_broker_patterns.logging import init_logger
 
 init_logger()
 
+import argparse  # noqa: E402
 import asyncio  # noqa: E402
 import logging  # noqa: E402
 
@@ -16,6 +17,9 @@ from message_broker_patterns.dlq_pattern.broker import (  # noqa: E402
 )
 from message_broker_patterns.dlq_pattern.consumer import run_idempotent_consumer  # noqa: E402
 from message_broker_patterns.dlq_pattern.models import Payment  # noqa: E402
+from message_broker_patterns.dlq_pattern.naive import (  # noqa: E402
+    run_retry_forever_consumer,
+)
 from message_broker_patterns.metrics import REGISTRY  # noqa: E402
 
 logger = logging.getLogger("run_dlq")
@@ -123,5 +127,72 @@ async def main() -> None:
     await broker.close()
 
 
+# --- naive baseline -----------------------------------------------------------
+# The same six payments, through a consumer with no attempt budget and no DLQ.
+# No chaos wrapper: the poison is already in the workload — PAY-003's negative
+# amount makes `handler` raise every single time, which is exactly what an
+# unbounded retry loop cannot survive. Injecting a fault would only hide that.
+NAIVE_GROUP = "naive_payment_workers"
+NAIVE_MAX_POLLS = 10  # scaffolding so the demo terminates; the design has no bound
+
+
+async def run_naive() -> None:
+    """INTENTIONALLY BROKEN — retry forever, no budget, no dead-letter queue."""
+    client = aioredis.from_url(settings.redis_url)
+    broker = DLQBroker(client)
+    await client.delete(MAIN_STREAM, DLQ_STREAM, PROCESSED_SET)
+    await broker.ensure_all_groups(NAIVE_GROUP)
+
+    logger.info("=== NAIVE dlq — retry forever (INTENTIONALLY BROKEN) ===")
+    logger.info("publishing %d payments (4 normal, 2 malformed)", len(PAYMENTS))
+    for payment in PAYMENTS:
+        await broker.publish(payment)
+
+    result = await run_retry_forever_consumer(
+        broker, "naive-worker-1", NAIVE_GROUP, handler, max_polls=NAIVE_MAX_POLLS
+    )
+
+    poison_id, attempts = max(result.failures.items(), key=lambda item: item[1])
+    starved = [
+        p.payment_id
+        for p in PAYMENTS
+        if p.payment_id not in result.processed and p.payment_id not in result.failures
+    ]
+    dlq_length = await client.xlen(DLQ_STREAM)
+    pending = await client.xpending(MAIN_STREAM, NAIVE_GROUP)
+
+    logger.info("=== Results ===")
+    logger.info(
+        "%d payments published, %d processed after %d poll(s): %s",
+        len(PAYMENTS),
+        len(result.processed),
+        result.polls,
+        result.processed,
+    )
+    logger.info("%s retried %d times and is still at the head of the queue", poison_id, attempts)
+    logger.info("starved behind it, never attempted once: %s", starved or "none")
+    logger.info("%s length: %d — nothing was ever dead-lettered", DLQ_STREAM, dlq_length)
+    logger.info("%s pending: %d message(s) still unacked", MAIN_STREAM, pending["pending"])
+    logger.info(
+        "Run without --naive: the same 6 payments, an attempt budget of %d, and the 2 "
+        "malformed ones parked in %s so the other 4 flow through.",
+        MAX_ATTEMPTS,
+        DLQ_STREAM,
+    )
+
+    await client.delete(MAIN_STREAM, DLQ_STREAM, PROCESSED_SET)
+    await broker.close()
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Dead Letter Queue payment-pipeline demo.")
+    parser.add_argument(
+        "--naive",
+        action="store_true",
+        help="run the intentionally broken retry-forever baseline (naive.py) instead",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(run_naive() if _parse_args().naive else main())
