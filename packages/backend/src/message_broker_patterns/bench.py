@@ -32,6 +32,12 @@ Failures are *not* swallowed: if the workload raises, the exception propagates
 and the bench dies. A harness that quietly counts errors reports a throughput
 number for work that never happened.
 
+A bench shares its broker with everything else on that Redis, including a second
+copy of itself, so :func:`new_run_id` mints a per-process id the scripts fold
+into the stream, consumer-group and consumer names they own. Two runs that share
+a group and a consumer name let Redis deliver one run's message to the other's
+consumer, which resolves the wrong future and hangs the run that published it.
+
 Results are emitted as JSON on a stream (:func:`emit_json`) — the required
 output — with CSV of the latency and queue-depth series available for charting
 (:func:`latency_csv`, :func:`queue_depth_csv`, :func:`write_csv_files`).
@@ -58,6 +64,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TextIO
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +78,32 @@ type DepthSampler = Callable[[], Awaitable[int]]
 #: How often the depth sampler runs during the measured window, in seconds.
 DEFAULT_SAMPLE_INTERVAL = 0.05
 
+#: Hex characters in a :func:`new_run_id`.
+RUN_ID_LENGTH = 8
+
 
 def now() -> float:
     """Monotonic seconds. Patchable, so a windowing test never has to wait."""
     return time.perf_counter()
+
+
+def new_run_id() -> str:
+    """Mint a short identity for one bench *process*.
+
+    Every bench script shares a Redis instance with whatever else is running,
+    including a second copy of itself. Redis Streams consumer groups track
+    delivery by consumer *name* within a group, not by process, so two runs
+    using the same group and the same consumer names let Redis hand a message
+    published by one process to the other's identically-named consumer — which
+    resolves its own local future and leaves the publisher awaiting one that is
+    never resolved. Folding this id into the stream, group and consumer names
+    keeps concurrent runs in disjoint keyspaces.
+
+    Eight hex characters: ~4 billion values is far more than enough to keep a
+    handful of concurrent runs apart, and short enough to keep the Redis key
+    names readable while an operator is watching ``redis-cli`` alongside a run.
+    """
+    return uuid4().hex[:RUN_ID_LENGTH]
 
 
 def percentile(values: Sequence[float], quantile: float) -> float:
