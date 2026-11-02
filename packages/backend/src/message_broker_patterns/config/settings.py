@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,6 +8,7 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
     log_level: str = "INFO"
+    log_format: Literal["text", "json"] = "text"
 
 
 settings = Settings()
