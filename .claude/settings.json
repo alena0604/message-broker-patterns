@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Edit(packages/backend/src/**)",
+      "Edit(packages/backend/tests/**)",
+      "Edit(packages/backend/scripts/**)",
+      "Edit(packages/backend/*.md)",
+      "Edit(README.md)",
+      "Edit(docs/**)",
+      "Edit(tracker/**)",
+      "Write(packages/backend/src/**)",
+      "Write(packages/backend/tests/**)",
+      "Write(packages/backend/scripts/**)",
+      "Write(packages/backend/*.md)",
+      "Write(README.md)",
+      "Write(docs/**)",
+      "Write(tracker/**)",
+      "Bash(make *)",
+      "Bash(uv *)",
+      "Bash(pytest *)",
+      "Bash(ruff *)",
+      "Bash(git status)",
+      "Bash(git status *)",
+      "Bash(git diff)",
+      "Bash(git diff *)",
+      "Bash(git log)",
+      "Bash(git log *)",
+      "Bash(git add *)",
+      "Bash(git mv *)",
+      "Bash(git checkout -b *)"
+    ]
+  }
+}

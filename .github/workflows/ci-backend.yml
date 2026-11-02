@@ -1,0 +1,37 @@
+name: CI — Backend
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: latest
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Format check
+        run: uv run ruff format --check src tests
+
+      - name: Lint check
+        run: uv run ruff check src tests
+
+      - name: Unit tests
+        run: uv run pytest tests/unit -q
+
+      - name: Integration tests
+        run: uv run pytest tests/integration -q
+
+      - name: Build
+        run: uv build
